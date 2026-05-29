@@ -1,0 +1,188 @@
+
+import tkinter as tk
+from tkinter import messagebox, ttk
+import sqlite3
+from datetime import datetime, timedelta
+
+class LibraryUltimate:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Sistem Perpustakaan Pro (Borrow, Return, Fine & Payment)")
+        self.root.geometry("1100x650")
+
+        # Inisialisasi Database
+        self.conn = sqlite3.connect("perpustakaan_ultimate.db")
+        self.cursor = self.conn.cursor()
+        self.setup_db()
+
+        # UI
+        self.create_widgets()
+        self.refresh_all()
+
+    def setup_db(self):
+        # Tabel Buku
+        self.cursor.execute("CREATE TABLE IF NOT EXISTS buku (id INTEGER PRIMARY KEY AUTOINCREMENT, judul TEXT, penulis TEXT, stok INTEGER)")
+        # Tabel Peminjaman
+        self.cursor.execute("""CREATE TABLE IF NOT EXISTS pinjam (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, 
+            nama TEXT, buku_id INTEGER, tgl_pinjam TEXT, tgl_deadline TEXT, 
+            status TEXT DEFAULT 'Dipinjam', denda INTEGER DEFAULT 0, status_denda TEXT DEFAULT '-')""")
+        self.conn.commit()
+
+    def create_widgets(self):
+        # Tabs
+        self.tabs = ttk.Notebook(self.root)
+        self.tab1 = tk.Frame(self.tabs)
+        self.tab2 = tk.Frame(self.tabs)
+        self.tabs.add(self.tab1, text="Inventory & Borrow")
+        self.tabs.add(self.tab2, text="Return & Payment (Denda)")
+        self.tabs.pack(expand=1, fill="both")
+
+        # --- TAB 1: BOOK & BORROW ---
+        # Frame Upload Buku
+        f_upload = tk.LabelFrame(self.tab1, text="Upload/Tambah Buku Baru")
+        f_upload.pack(fill="x", padx=10, pady=5)
+        
+        tk.Label(f_upload, text="Judul:").grid(row=0, column=0, padx=5)
+        self.ent_judul = tk.Entry(f_upload)
+        self.ent_judul.grid(row=0, column=1)
+        
+        tk.Label(f_upload, text="Penulis:").grid(row=0, column=2, padx=5)
+        self.ent_penulis = tk.Entry(f_upload)
+        self.ent_penulis.grid(row=0, column=3)
+        
+        tk.Label(f_upload, text="Stok:").grid(row=0, column=4, padx=5)
+        self.ent_stok = tk.Entry(f_upload, width=5)
+        self.ent_stok.grid(row=0, column=5)
+        
+        tk.Button(f_upload, text="Upload Buku", bg="green", fg="white", command=self.upload_buku).grid(row=0, column=6, padx=10, pady=5)
+
+        # Frame Borrow (Peminjaman)
+        f_borrow = tk.LabelFrame(self.tab1, text="Borrow Book (Pinjam)")
+        f_borrow.pack(fill="x", padx=10, pady=5)
+        
+        tk.Label(f_borrow, text="Nama Peminjam:").grid(row=0, column=0, padx=5)
+        self.ent_nama = tk.Entry(f_borrow)
+        self.ent_nama.grid(row=0, column=1)
+        
+        tk.Label(f_borrow, text="ID Buku:").grid(row=0, column=2, padx=5)
+        self.ent_bid = tk.Entry(f_borrow, width=5)
+        self.ent_bid.grid(row=0, column=3)
+        
+        tk.Button(f_borrow, text="Borrow Now", bg="blue", fg="white", command=self.borrow_now).grid(row=0, column=4, padx=10, pady=5)
+
+        # Treeview Buku
+        self.tree_buku = ttk.Treeview(self.tab1, columns=("id", "judul", "penulis", "stok"), show="headings")
+        for c in ("id", "judul", "penulis", "stok"): self.tree_buku.heading(c, text=c.upper())
+        self.tree_buku.pack(fill="both", expand=True, padx=10)
+        tk.Button(self.tab1, text="Delete Selected Book", bg="red", fg="white", command=self.delete_buku).pack(pady=5)
+
+        # --- TAB 2: RETURN & FINE ---
+        f_return = tk.Frame(self.tab2)
+        f_return.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.tree_pinjam = ttk.Treeview(f_return, columns=("id", "nama", "bid", "dead", "status", "denda", "sdenda"), show="headings")
+        headers = [("id", "ID"), ("nama", "Nama"), ("bid", "Buku ID"), ("dead", "Deadline"), ("status", "Status"), ("denda", "Denda"), ("sdenda", "Status Denda")]
+        for c, h in headers: 
+            self.tree_pinjam.heading(c, text=h)
+            self.tree_pinjam.column(c, width=100)
+        self.tree_pinjam.pack(fill="both", expand=True)
+
+        # Buttons for Tab 2
+        btn_f = tk.Frame(self.tab2)
+        btn_f.pack(pady=10)
+        tk.Button(btn_f, text="Fo Fila (Give Back Book)", bg="orange", font=("Arial", 10, "bold"), command=self.return_book).pack(side="left", padx=10)
+        tk.Button(btn_f, text="Pay Fine (Give Back Money)", bg="gold", font=("Arial", 10, "bold"), command=self.pay_fine).pack(side="left", padx=10)
+
+    # --- LOGIKA FUNGSI ---
+    
+    def upload_buku(self):
+        if self.ent_judul.get():
+            self.cursor.execute("INSERT INTO buku (judul, penulis, stok) VALUES (?,?,?)", (self.ent_judul.get(), self.ent_penulis.get(), self.ent_stok.get()))
+            self.conn.commit()
+            self.refresh_all()
+            messagebox.showinfo("Sukses", "Buku berhasil diupload!")
+
+    def delete_buku(self):
+        sel = self.tree_buku.focus()
+        if sel:
+            bid = self.tree_buku.item(sel)['values'][0]
+            self.cursor.execute("DELETE FROM buku WHERE id=?", (bid,))
+            self.conn.commit()
+            self.refresh_all()
+
+    def borrow_now(self):
+        nama = self.ent_nama.get()
+        bid = self.ent_bid.get()
+        if not (nama and bid): return
+        
+        # Cek Stok
+        self.cursor.execute("SELECT stok FROM buku WHERE id=?", (bid,))
+        res = self.cursor.fetchone()
+        if res and res[0] > 0:
+            deadline = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+            tgl_p = datetime.now().strftime("%Y-%m-%d")
+            self.cursor.execute("INSERT INTO pinjam (nama, buku_id, tgl_pinjam, tgl_deadline) VALUES (?,?,?,?)", (nama, bid, tgl_p, deadline))
+            self.cursor.execute("UPDATE buku SET stok = stok - 1 WHERE id=?", (bid,))
+            self.conn.commit()
+            self.refresh_all()
+            messagebox.showinfo("Sukses", f"Berhasil pinjam! Batas: {deadline}")
+        else:
+            messagebox.showerror("Error", "Buku tidak tersedia!")
+
+    def return_book(self):
+        sel = self.tree_pinjam.focus()
+        if not sel: return
+        data = self.tree_pinjam.item(sel)['values']
+        pid, bid, dead, status = data[0], data[2], data[3], data[4]
+
+        if status == 'Kembali':
+            messagebox.showwarning("Info", "Buku ini sudah dikembalikan sebelumnya.")
+            return
+
+        # Hitung Denda
+        d_obj = datetime.strptime(dead, "%Y-%m-%d")
+        now = datetime.now()
+        denda = 0
+        s_denda = "-"
+        if now > d_obj:
+            hari_telat = (now - d_obj).days
+            denda = hari_telat * 2000 # Contoh Rp 2.000 per hari
+            s_denda = "BELUM LUNAS"
+
+        self.cursor.execute("UPDATE pinjam SET status='Kembali', denda=?, status_denda=? WHERE id=?", (denda, s_denda, pid))
+        self.cursor.execute("UPDATE buku SET stok = stok + 1 WHERE id=?", (bid,))
+        self.conn.commit()
+        self.refresh_all()
+        messagebox.showinfo("Return Success", f"Buku dikembalikan. Denda: Rp {denda}")
+
+    def pay_fine(self):
+        sel = self.tree_pinjam.focus()
+        if not sel: return
+        data = self.tree_pinjam.item(sel)['values']
+        pid, denda, s_denda = data[0], data[5], data[6]
+
+        if denda > 0 and s_denda == "BELUM LUNAS":
+            if messagebox.askyesno("Payment", f"Bayar denda Rp {denda}?"):
+                self.cursor.execute("UPDATE pinjam SET status_denda='LUNAS' WHERE id=?", (pid,))
+                self.conn.commit()
+                self.refresh_all()
+                messagebox.showinfo("Payment", "Give back money success! Denda Lunas.")
+        else:
+            messagebox.showinfo("Info", "Tidak ada denda yang perlu dibayar.")
+
+    def refresh_all(self):
+        # Refresh Tabel Buku
+        self.tree_buku.delete(*self.tree_buku.get_children())
+        self.cursor.execute("SELECT * FROM buku")
+        for r in self.cursor.fetchall(): self.tree_buku.insert('', 'end', values=r)
+        
+        # Refresh Tabel Pinjam
+        self.tree_pinjam.delete(*self.tree_pinjam.get_children())
+        self.cursor.execute("SELECT id, nama, buku_id, tgl_deadline, status, denda, status_denda FROM pinjam")
+        for r in self.cursor.fetchall(): self.tree_pinjam.insert('', 'end', values=r)
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = LibraryUltimate(root)
+    root.mainloop()

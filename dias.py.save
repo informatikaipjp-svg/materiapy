@@ -1,0 +1,155 @@
+import tkinter as tk
+from tkinter import messagebox, ttk
+import sqlite3
+
+class LibrarySystem:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Sistem Manajemen Perpustakaan")
+        self.root.geometry("900x500")
+
+        # Inisialisasi Database
+        self.conn = sqlite3.connect("perpustakaan.db")
+        self.cursor = self.conn.cursor()
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS buku (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                judul TEXT,
+                penulis TEXT,
+                tahun TEXT,
+                isbn TEXT
+            )
+        """)
+        self.conn.commit()
+
+        # Variable
+        self.var_judul = tk.StringVar()
+        self.var_penulis = tk.StringVar()
+        self.var_tahun = tk.StringVar()
+        self.var_isbn = tk.StringVar()
+
+        # --- UI Layout ---
+        # Judul
+        title = tk.Label(self.root, text="MANAJEMEN DATA BUKU", font=("Arial", 20, "bold"), pady=20)
+        title.pack(side=tk.TOP, fill=tk.X)
+
+        # Frame Input
+        input_frame = tk.Frame(self.root, bd=4, relief=tk.RIDGE, padx=20, pady=20)
+        input_frame.place(x=20, y=80, width=400, height=380)
+
+        tk.Label(input_frame, text="Judul Buku", font=("Arial", 12)).grid(row=0, column=0, sticky="w", pady=10)
+        tk.Entry(input_frame, textvariable=self.var_judul, font=("Arial", 12)).grid(row=0, column=1, pady=10)
+
+        tk.Label(input_frame, text="Penulis", font=("Arial", 12)).grid(row=1, column=0, sticky="w", pady=10)
+        tk.Entry(input_frame, textvariable=self.var_penulis, font=("Arial", 12)).grid(row=1, column=1, pady=10)
+
+        tk.Label(input_frame, text="Tahun Terbit", font=("Arial", 12)).grid(row=2, column=0, sticky="w", pady=10)
+        tk.Entry(input_frame, textvariable=self.var_tahun, font=("Arial", 12)).grid(row=2, column=1, pady=10)
+
+        tk.Label(input_frame, text="ISBN", font=("Arial", 12)).grid(row=3, column=0, sticky="w", pady=10)
+        tk.Entry(input_frame, textvariable=self.var_isbn, font=("Arial", 12)).grid(row=3, column=1, pady=10)
+
+        # Button Frame
+        btn_frame = tk.Frame(input_frame, bd=2, relief=tk.GROOVE)
+        btn_frame.place(x=0, y=250, width=350, height=80)
+
+        tk.Button(btn_frame, text="Tambah", command=self.add_book, width=10, bg="green", fg="white").grid(row=0, column=0, padx=5, pady=20)
+        tk.Button(btn_frame, text="Update", command=self.update_book, width=10, bg="blue", fg="white").grid(row=0, column=1, padx=5, pady=20)
+        tk.Button(btn_frame, text="Hapus", command=self.delete_book, width=10, bg="red", fg="white").grid(row=0, column=2, padx=5, pady=20)
+        tk.Button(btn_frame, text="Clear", command=self.clear_fields, width=10).grid(row=0, column=3, padx=5, pady=20)
+
+        # Frame Tabel
+        table_frame = tk.Frame(self.root, bd=4, relief=tk.RIDGE)
+        table_frame.place(x=440, y=80, width=440, height=380)
+
+        scroll_x = tk.Scrollbar(table_frame, orient=tk.HORIZONTAL)
+        scroll_y = tk.Scrollbar(table_frame, orient=tk.VERTICAL)
+        
+        self.book_table = ttk.Treeview(table_frame, columns=("id", "judul", "penulis", "tahun", "isbn"), 
+                                       xscrollcommand=scroll_x.set, yscrollcommand=scroll_y.set)
+        
+        scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
+        scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+        scroll_x.config(command=self.book_table.xview)
+        scroll_y.config(command=self.book_table.yview)
+
+        self.book_table.heading("id", text="ID")
+        self.book_table.heading("judul", text="Judul")
+        self.book_table.heading("penulis", text="Penulis")
+        self.book_table.heading("tahun", text="Tahun")
+        self.book_table.heading("isbn", text="ISBN")
+        
+        self.book_table['show'] = 'headings'
+        self.book_table.column("id", width=30)
+        self.book_table.pack(fill=tk.BOTH, expand=1)
+        self.book_table.bind("<ButtonRelease-1>", self.get_cursor)
+
+        self.fetch_data()
+
+    # --- Fungsi-Fungsi ---
+    def add_book(self):
+        if self.var_judul.get() == "" or self.var_isbn.get() == "":
+            messagebox.showerror("Error", "Judul dan ISBN wajib diisi!")
+        else:
+            self.cursor.execute("INSERT INTO buku (judul, penulis, tahun, isbn) VALUES (?,?,?,?)", 
+                                (self.var_judul.get(), self.var_penulis.get(), self.var_tahun.get(), self.var_isbn.get()))
+            self.conn.commit()
+            self.fetch_data()
+            self.clear_fields()
+            messagebox.showinfo("Sukses", "Buku berhasil ditambahkan")
+
+    def fetch_data(self):
+        self.cursor.execute("SELECT * FROM buku")
+        rows = self.cursor.fetchall()
+        if len(rows) != 0:
+            self.book_table.delete(*self.book_table.get_children())
+            for row in rows:
+                self.book_table.insert('', tk.END, values=row)
+            self.conn.commit()
+
+    def clear_fields(self):
+        self.var_judul.set("")
+        self.var_penulis.set("")
+        self.var_tahun.set("")
+        self.var_isbn.set("")
+
+    def get_cursor(self, ev):
+        cursor_row = self.book_table.focus()
+        contents = self.book_table.item(cursor_row)
+        row = contents['values']
+        if row:
+            self.var_judul.set(row[1])
+            self.var_penulis.set(row[2])
+            self.var_tahun.set(row[3])
+            self.var_isbn.set(row[4])
+
+    def update_book(self):
+        cursor_row = self.book_table.focus()
+        if not cursor_row:
+            messagebox.showwarning("Peringatan", "Pilih data yang ingin diupdate!")
+            return
+        
+        id_buku = self.book_table.item(cursor_row)['values'][0]
+        self.cursor.execute("UPDATE buku SET judul=?, penulis=?, tahun=?, isbn=? WHERE id=?", 
+                            (self.var_judul.get(), self.var_penulis.get(), self.var_tahun.get(), self.var_isbn.get(), id_buku))
+        self.conn.commit()
+        self.fetch_data()
+        messagebox.showinfo("Sukses", "Data buku diperbarui")
+
+    def delete_book(self):
+        cursor_row = self.book_table.focus()
+        if not cursor_row:
+            messagebox.showwarning("Peringatan", "Pilih data yang ingin dihapus!")
+            return
+        
+        id_buku = self.book_table.item(cursor_row)['values'][0]
+        self.cursor.execute("DELETE FROM buku WHERE id=?", (id_buku,))
+        self.conn.commit()
+        self.fetch_data()
+        self.clear_fields()
+        messagebox.showinfo("Sukses", "Buku berhasil dihapus")
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    obj = LibrarySystem(root)
+    root.mainloop()
